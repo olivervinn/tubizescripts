@@ -1,0 +1,7 @@
+imutils
+opencv-python
+numpy
+sphinx
+yapf
+pylint
+pytest
