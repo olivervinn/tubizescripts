@@ -13,12 +13,19 @@ class LibraryAsset:
     def __init__(self, filename):
         """Given a path extra meta information."""
         self.filename = os.path.normpath(filename)
-        self.attributes = None
-        self.acquire_attributes()
+        self.updated = False
+        self._attributes = None
 
     def acquire_attributes(self):
         """Process video to get meta data attributes from stream."""
         self.attributes = VideoMetaInfo(self.filename)
+
+    @property
+    def attributes(self):
+        """Get attributes ondemand."""
+        if not self._attributes:
+            self._attributes = VideoMetaInfo(self.filename)
+        return self._attributes
 
     @property
     def name(self):

@@ -7,7 +7,6 @@ and a scrub sprite for video track scrubbing, along with VTT description.
 import os
 import collections
 import logging
-import json
 import tempfile
 import time
 import math
@@ -66,7 +65,7 @@ class LibraryMaker:
         _, took = ffmpeg(
             f'-ss 00:00:04 -i "{asset.filename}" -filter_complex  \
              "yadif=1,select=\'gt(scene,{step:.3f})\',setpts=N/(25*TB),scale={self.preview_width}:-1"  \
-             -vsync vfr "{tmp}{os.path.sep}%03d.png"')
+             -vsync vfr "{tmp}{os.path.sep}%03d.png"'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      )
         files = os.listdir(tmp)
         count = len(files)
         print(f"Found {count} in {took:.2f}s")
@@ -94,12 +93,15 @@ class LibraryMaker:
     def generate_tile_thumbnail_file(self, files: [], output_filename):
         """Creates a mosaic of input files."""
         count = len(files)
-        count = count if count < 50 else 49
-        d = int(math.sqrt(count if count > 0 else 1))
-        width = self.options.preview_width
-        file_list = " ".join('"%s"' % f for f in files)
-        ffmpeg(
-            f'-i {file_list} -filter_complex "scale={width}:-1,tile={d}x{d}" "{output_filename}"'
+        dim = 5
+        while count < dim * dim:
+            dim -= 1
+        log.debug("tile - %s %dx%s - %d", output_filename, dim, dim, count)
+        gw = int(350 / dim)
+        gh = int(200 / dim)
+        files = ' '.join('"{0}"'.format(f) for f in files[:dim*dim])
+        call(
+            f'montage {files} -geometry {gw}x{gh}+0+0 -tile {dim}x{dim} -gravity center -background black "{output_filename}"'
         )
 
     def generate_thumbnail_file(self, asset: LibraryAsset) -> None:
@@ -109,7 +111,7 @@ class LibraryMaker:
         while True:
             ffmpeg(
                 f'-i "{asset.filename}" -ss 00:{int(offset / 60):02d}:{offset % 60:02d} -vframes 1 -q:v 5 \
-                    -vf "scale={self.preview_width*2}:-1" "{output_filename}"')
+                    -vf "scale={self.preview_width*2}:-1" "{output_filename}"'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    )
             if offset > 500 and not os.path.exists(output_filename):
                 print("Unable to find thumbnail!")
                 break
@@ -152,19 +154,21 @@ class LibraryMaker:
         _, cols, rows = attributes.calc_scrub_image_properties(width)
         ffmpeg(f'-ss 00:00:04 -i "{asset.filename}" -frames 1 -q:v 2 -vf \
              "yadif=1,select=\'not(mod(n\\,{attributes.fps * 2}))\',scale={width}:-1,tile={cols}x{rows}" \
-             "{asset.scrub_image_filename}"')
+             "{asset.scrub_image_filename}"'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        )
         size = sizeof_fmt(os.path.getsize(asset.scrub_image_filename))
         print(f"    Timeline size {size} for {cols}x{rows}")
 
     def generate_animated_webp_file(self, asset):
         """Generate an animated preview for input video."""
+        output_filename = asset.webp_filename
+        if os.path.exists(output_filename + ".ignore"):
+            return False, 0
         state = collections.namedtuple('State', ['values', 'steps', 'step'])
         state.values = []
         state.steps = []
         state.step = self.options.default_scene_detection
         start_time = time.time()
         count = 0
-        output_filename = asset.webp_filename
         attributes = asset.attributes
         while not os.path.exists(output_filename + ".ignore"):
             with tempfile.TemporaryDirectory(prefix="preview") as tmp_basename:
@@ -198,25 +202,38 @@ class LibraryMaker:
         with open(asset.meta_filename, "w") as meta_file:
             meta_file.write(asset.attributes.to_json())
 
+    @classmethod
+    def is_hidden_folder(cls, file_path):
+        """Check name matches hidden format e.g. .<name>"""
+        folders = os.path.normcase(file_path).split(os.path.sep)
+        for f in folders:
+            if f.startswith("."):
+                log.debug("Ignore hidden %s", file_path)
+                return True
+        return False
+
     def add_video(self, filename: str) -> LibraryAsset:
         """Create the preview artifacts for the input video."""
         asset = LibraryAsset(filename)
-        asset.attributes.print()
         os.makedirs(asset.preview_basedir, exist_ok=True)
         options = self.options
         if options.thumb:
             if not os.path.exists(asset.tile_image_filename) or options.force:
                 self.generate_thumbnail_file(asset)
+                asset.updated = True
         if options.preview:
             if not os.path.exists(asset.webp_filename) or options.force:
-                found, sp = self.generate_animated_webp_file(asset)
+                self.generate_animated_webp_file(asset)
+                asset.updated = True
         if options.scrub:
             if not (os.path.exists(asset.scrub_image_filename)
                     and os.path.exists(asset.vtt_filename)) or options.force:
                 self.generate_video_scrub_file(asset)
                 self.generate_vtt_file(asset)
+                asset.updated = True
         if not os.path.exists(asset.meta_filename):
             self.generate_meta_file(asset)
+            asset.updated = True
         return asset
 
     def add_directory(self, path: str) -> []:
@@ -224,12 +241,13 @@ class LibraryMaker:
         Process directory `path` adding mp4 files to the in
         memory library catalog.
         """
-        log.debug("Finding videos in directory ... ")
+        print("Finding videos in directory ... ")
         matching_files = find_files(path, "mp4")
         meta_infos = []
         for filename in matching_files:
-            m_info = self.add_video(filename)
-            meta_infos.append(m_info)
+            if not LibraryMaker.is_hidden_folder(filename):
+                m_info = self.add_video(filename)
+                meta_infos.append(m_info)
         return meta_infos
 
     def create_catalog(self, output_filename: str, assets: []):
@@ -237,17 +255,24 @@ class LibraryMaker:
         Create a catalog file `output_filename` from the
         asset objects `assets`.
         """
-        skip = 0
+        any_updated = False
         catalog = LibraryCatalog()
         for asset in assets:
             if not catalog.append(asset):
-                print(f"Skipping filename - '{asset.filename}'")
-                skip += 1
+                any_updated = any_updated or asset.updated
                 continue
+
         catalog.update_group_thumbnails(self.generate_tile_thumbnail_file,
-                                        output_filename)
-        with open(output_filename, "w") as cat_file:
-            cat_file.write(catalog.to_json())
-        print(f"Wrote catalog {output_filename}")
-        print(f"Total Data Size: {sizeof_fmt(catalog.total_file_size)}")
-        print(f"Total Duration: {time_fmt(catalog.total_duration)}")
+                                        output_filename, any_updated)
+        if any_updated:
+            if not os.path.exists(output_filename):
+                print("Building catalog ... ")
+                data = catalog.to_json()
+                with open(output_filename, "w") as cat_file:
+                    cat_file.write(data)
+                print(f"Wrote catalog {output_filename}")
+                print(
+                    f"Total Data Size: {sizeof_fmt(catalog.total_file_size)}")
+                print(f"Total Duration: {time_fmt(catalog.total_duration)}")
+            else:
+                print(f"No updates!")

@@ -13,37 +13,31 @@ class LibraryCatalog(dict):
         self.total_file_size = 0
         self.total_duration = 0
 
-    @classmethod
-    def is_hidden_folder(cls, file_path):
-        """Check name matches hidden format e.g. _<name>"""
-        ignore_path = "\\_" in file_path or "/_" in file_path
-        ignore_name = " " in file_path
-        return ignore_name or ignore_path
-
     def append(self, asset: LibraryAsset):
         """Add video asset to grouping."""
-        hide = self.is_hidden_folder(asset.filename)
-        if not hide:
-            group = asset.group
-            if group not in self.groups:
-                self.groups[group] = {'assets': [], 'time': 0}
-            group = self.groups[group]
-            group['assets'].append(asset)
-            group['thumbnail'] = ''
-            group['time'] += asset.attributes.duration
-            self.total_file_size += os.path.getsize(asset.filename)
-            self.total_duration += asset.attributes.duration
-        return not hide
+        group = asset.group
+        if group not in self.groups:
+            self.groups[group] = {'assets': [], 'time': 0}
+        group = self.groups[group]
+        group['assets'].append(asset)
 
-    def update_group_thumbnails(self, tile_function, output_filename):
+    def update_group_thumbnails(self, tile_function, output_filename, updates):
         """Create group thumbnail."""
         for name, g in self.groups.items():
-            files = [f.tile_image_filename for f in g['assets']]
-            g['thumbnail'] = f"{output_filename}.{name}.jpeg"
-            tile_function(files, g['thumbnail'])
+            fname = f'{os.path.dirname(output_filename)}/{name}.jpg'
+            if not os.path.exists(fname) or updates:
+                files = [f.tile_image_filename for f in g['assets']]
+                tile_function(files, fname)
+                g['thumbnail'] = fname
 
     def to_json(self):
         """Emit a JSON description of structure."""
+        for group in self.groups.values():
+            for asset in group['assets']:
+                group['time'] += asset.attributes.duration
+                self.total_file_size += os.path.getsize(asset.filename)
+                self.total_duration += asset.attributes.duration
+
         def serialize(obj):
             """Serialize data."""
             if isinstance(obj, LibraryAsset):

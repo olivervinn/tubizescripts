@@ -22,10 +22,19 @@ tubize.utils module
     :members:
     :show-inheritance:
 
-tubize.videoassetcatalog module
+
+tubize.librarymaker module
 -------------------------------
 
-.. automodule:: tubize.videoassetcatalog
+.. automodule:: tubize.librarymaker
+    :members:
+    :show-inheritance:
+    
+
+tubize.librarycatalog module
+-------------------------------
+
+.. automodule:: tubize.librarycatalog
     :members:
     :show-inheritance:
 

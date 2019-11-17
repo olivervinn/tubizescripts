@@ -2,7 +2,7 @@
 Extracts video file meta data from files.
 """
 import os
-import sys
+import collections
 import math
 import json
 import logging
@@ -10,40 +10,77 @@ from .utils import time_fmt, call
 
 log = logging.getLogger(__name__)
 
+Prop = collections.namedtuple(
+    'Properties', 'fps frames height width aspect_ratio original_date')
+
 
 class VideoMetaInfo(object):
     """Container for video properties."""
     def __init__(self, filename):
         """Uninitialized instance of container."""
-        self.fps = 1
-        self.frames = 0
-        self.height = 0
-        self.width = 0
-        self.aspect_ratio = 0
-        self.original_date = None
         self.filename = str(filename)
+        self._props = None
+
+    @property
+    def fps(self):
         self._get_video_info()
+        return self._props.fps
+
+    @property
+    def frames(self):
+        self._get_video_info()
+        return self._props.frames
+
+    @property
+    def height(self):
+        self._get_video_info()
+        return self._props.height
+
+    @property
+    def width(self):
+        self._get_video_info()
+        return self._props.width
+
+    @property
+    def aspect_ratio(self):
+        self._get_video_info()
+        return self._props.aspect_ratio
+
+    @property
+    def original_date(self):
+        self._get_video_info()
+        return self._props.original_date
 
     def _get_video_info(self):
         """Extract video properties."""
-        stdout, _, _ = call(
-            f'ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate,nb_frames,height,width,display_aspect_ratio \
-             -of default=nokey=1:noprint_wrappers=1 "{self.filename}"')
-        try:
-            s = stdout.split('\n')
-            self.width = int(s[0])
-            self.height = int(s[1])
-            self.aspect_ratio = s[2]
-            self.fps = int(int(s[3].split("/")[0]) / int(s[3].split("/")[1]))
-            self.frames = int(s[4])
-        except (ValueError, IndexError):
-            log.error("parse failed inspecting response '%s'", s)
-        log.debug("attributes: %sx%s@%d", self.width, self.height, self.fps)
-        stdout, _, _ = call(f'mediainfo "{self.filename}"')
-        if "Recorded date" in stdout:
-            s = stdout.split("Recorded date")[1]
-            self.original_date = s.strip().split()[1]
-        log.info("recorded date: %s", self.original_date)
+        if not self._props:
+            stdout, _, _ = call(
+                f'ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate,nb_frames,height,width,display_aspect_ratio \
+                -of default=nokey=1:noprint_wrappers=1 "{self.filename}"')
+            prop = stdout.split('\n')
+            recorded_date = ""
+            stdout, _, _ = call(f'mediainfo "{self.filename}"')
+            if "Recorded date" in stdout:
+                recorded_date = stdout.split("Recorded date")[1]
+                recorded_date = recorded_date.strip().split()[1]
+            try:
+                self._props = Prop(width=int(prop[0]),
+                                   height=int(prop[1]),
+                                   aspect_ratio=prop[2],
+                                   fps=int(
+                                       int(prop[3].split("/")[0]) /
+                                       int(prop[3].split("/")[1])),
+                                   frames=int(prop[4]),
+                                   original_date=recorded_date)
+            except (ValueError, IndexError):
+                log.error("parse failed inspecting response '%s'",
+                          self.filename)
+                self._props = Prop(width=100,
+                                   height=100,
+                                   aspect_ratio=1,
+                                   fps=30,
+                                   frames=1,
+                                   original_date=recorded_date)
 
     @property
     def name(self) -> str:
